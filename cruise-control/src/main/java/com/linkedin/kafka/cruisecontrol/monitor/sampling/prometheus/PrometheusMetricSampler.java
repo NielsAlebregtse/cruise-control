@@ -9,6 +9,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Stream;
+
 import org.apache.http.HttpHost;
 import org.apache.http.impl.client.CloseableHttpClient;
 import org.apache.http.impl.client.HttpClients;
@@ -65,6 +67,7 @@ public class PrometheusMetricSampler extends AbstractMetricSampler {
 
     protected int _samplingIntervalMs;
     protected Map<String, Integer> _hostToBrokerIdMap = new HashMap<>();
+    protected Map<String, Integer> _hostPortToBrokerIdMap = new HashMap<>();
     protected PrometheusAdapter _prometheusAdapter;
     protected Map<RawMetricType, String> _metricToPrometheusQueryMap;
     private CloseableHttpClient _httpClient;
@@ -141,18 +144,32 @@ public class PrometheusMetricSampler extends AbstractMetricSampler {
         _httpClient.close();
     }
 
-    private Integer getBrokerIdForHostName(String host, Cluster cluster) {
-        Integer cachedId = _hostToBrokerIdMap.get(host);
+    private Integer getBrokerId(String host, Cluster cluster, Map<String, Integer> map) {
+        Integer cachedId = map.get(host);
         if (cachedId != null) {
             return cachedId;
         }
         mapNodesToClusterId(cluster);
-        return _hostToBrokerIdMap.get(host);
+        return map.get(host);
+    }
+
+    private Integer getBrokerIdForHostPort(String hostPort, Cluster cluster) {
+        return getBrokerId(hostPort, cluster, _hostPortToBrokerIdMap);
+    }
+
+    private Integer getBrokerIdForHostName(String hostName, Cluster cluster) {
+        return getBrokerId(hostName, cluster, _hostToBrokerIdMap);
     }
 
     private void mapNodesToClusterId(Cluster cluster) {
         for (Node node : cluster.nodes()) {
-            _hostToBrokerIdMap.put(String.format("%s:%d", node.host(), node.port()), node.id());
+            _hostToBrokerIdMap.put(node.host(), node.id());
+            /* In many cases host name only will be sufficient to identify the Kafka broker. However, within Kafka the
+            host:port combination comprises the unique address for a broker. For these cases, we also construct a map
+            with the full address available. When performing a lookup on this map, it is assumed the Prometheus
+            instance metric label has been relabeled to reflect the Kafka port, rather than the metrics port.
+             */
+            _hostPortToBrokerIdMap.put(String.format("%s:%d", node.host(), node.port()), node.id());
         }
     }
 
@@ -257,12 +274,19 @@ public class PrometheusMetricSampler extends AbstractMetricSampler {
         Integer brokerId;
 
         String hostName = hostPort.split(":")[0];
-        brokerId = getBrokerIdForHostName(hostPort, cluster);
+        brokerId = getBrokerIdForHostName(hostName, cluster);
+        if (brokerId == null) {
+            /* If the hostname lookup fails, first try to do a lookup of the broker id on the host:port combination.
+            Note that this requires a relabeling of the Prometheus instance metric label, where the Prometheus metric
+            port is substituted with the Kafka broker port.
+             */
+            brokerId = getBrokerIdForHostPort(hostPort, cluster);
+        }
         if (brokerId == null) {
             throw new InvalidPrometheusResultException(String.format(
                 "Unexpected host %s, does not map to any of broker found from Kafka cluster metadata."
                     + " Brokers found in Kafka cluster metadata = %s",
-                hostName, _hostToBrokerIdMap.keySet()));
+                hostName, _hostPortToBrokerIdMap.keySet()));
         }
         return brokerId;
     }
