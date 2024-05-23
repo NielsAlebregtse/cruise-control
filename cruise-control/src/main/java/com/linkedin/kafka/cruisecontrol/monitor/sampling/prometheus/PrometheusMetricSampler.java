@@ -152,7 +152,7 @@ public class PrometheusMetricSampler extends AbstractMetricSampler {
 
     private void mapNodesToClusterId(Cluster cluster) {
         for (Node node : cluster.nodes()) {
-            _hostToBrokerIdMap.put(node.host(), node.id());
+            _hostToBrokerIdMap.put(String.format("%s:%d", node.host(), node.port()), node.id());
         }
     }
 
@@ -257,7 +257,7 @@ public class PrometheusMetricSampler extends AbstractMetricSampler {
         Integer brokerId;
 
         String hostName = hostPort.split(":")[0];
-        brokerId = getBrokerIdForHostName(hostName, cluster);
+        brokerId = getBrokerIdForHostName(hostPort, cluster);
         if (brokerId == null) {
             throw new InvalidPrometheusResultException(String.format(
                 "Unexpected host %s, does not map to any of broker found from Kafka cluster metadata."
