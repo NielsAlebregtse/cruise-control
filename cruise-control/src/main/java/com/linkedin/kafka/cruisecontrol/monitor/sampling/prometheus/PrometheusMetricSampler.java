@@ -170,6 +170,7 @@ public class PrometheusMetricSampler extends AbstractMetricSampler {
             instance metric label has been relabeled to reflect the Kafka port, rather than the metrics port.
              */
             _hostPortToBrokerIdMap.put(String.format("%s:%d", node.host(), node.port()), node.id());
+            LOG.debug(String.format("New Host:Port to Broker map is %s", _hostPortToBrokerIdMap));
         }
     }
 
@@ -189,6 +190,7 @@ public class PrometheusMetricSampler extends AbstractMetricSampler {
                 LOG.error("Error when attempting to query Prometheus metrics", e);
                 throw new SamplingException("Could not query metrics from Prometheus");
             }
+            LOG.trace(prometheusQueryResults.toString());
             for (PrometheusQueryResult result : prometheusQueryResults) {
                 try {
                     switch (metricType.metricScope()) {
@@ -268,6 +270,7 @@ public class PrometheusMetricSampler extends AbstractMetricSampler {
     private int getBrokerId(Cluster cluster, PrometheusQueryResult queryResult) throws
         InvalidPrometheusResultException {
         String hostPort = queryResult.metric().instance();
+        LOG.trace(String.format("Getting broker id for %s", hostPort));
         if (hostPort == null) {
             throw new InvalidPrometheusResultException("Instance returned as part of Prometheus API response is null.");
         }
@@ -276,7 +279,7 @@ public class PrometheusMetricSampler extends AbstractMetricSampler {
         String hostName = hostPort.split(":")[0];
         brokerId = getBrokerIdForHostName(hostName, cluster);
         if (brokerId == null) {
-            /* If the hostname lookup fails, first try to do a lookup of the broker id on the host:port combination.
+            /* If the hostname lookup fails, try to do a lookup of the broker id on the host:port combination.
             Note that this requires a relabeling of the Prometheus instance metric label, where the Prometheus metric
             port is substituted with the Kafka broker port.
              */
